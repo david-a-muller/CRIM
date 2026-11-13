@@ -26,4 +26,5 @@ Binary-collision approximation in an amorphous target: ZBL universal potential w
 
 ## Credits
 
+Developed by David A. Muller and Claude
 ZBL85 electronic-stopping coefficients are taken from [pyRUMP](https://github.com/ikost/pyRUMP) (MIT License). See `THIRD_PARTY_NOTICES.md`.
