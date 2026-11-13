@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRIM: Claude's Range of Ions in Materials</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
+<style>
+:root{--bg:#ECEDEF;--panel:#F8F8F9;--ink:#17151A;--muted:#5E5A66;--line:#D0CDD5;--accent:#C2410C;
+  --f-disp:"Archivo","Arial Narrow",system-ui,sans-serif;--f-body:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#110F14;--panel:#18161C;--ink:#ECE8F0;--muted:#968FA3;--line:#2C2833;--accent:#FF8A4C;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;padding:40px max(16px,env(safe-area-inset-left,0px)) 48px max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1{font-family:var(--f-disp);font-stretch:68%;font-weight:800;font-size:clamp(40px,7vw,64px);line-height:1;margin:0}
+.tag{font-family:var(--f-disp);font-stretch:80%;font-weight:600;font-size:clamp(17px,2.4vw,22px);color:var(--accent);margin:6px 0 0}
+p{margin:0;max-width:66ch;color:var(--muted)}
+.tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+a.tool{display:flex;flex-direction:column;gap:6px;text-decoration:none;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px}
+a.tool:hover,a.tool:focus-visible{border-color:var(--accent);outline:none;box-shadow:inset 0 0 0 1px var(--accent)}
+a.tool b{font-family:var(--f-disp);font-stretch:80%;font-size:21px}
+a.tool span{color:var(--muted);font-size:13.5px}
+footer{border-top:1px solid var(--line);padding-top:14px;font-size:12.5px;color:var(--muted)}
+footer a{color:inherit}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>CRIM</h1><p class="tag">Claude’s Range of Ions in Materials</p></header>
+  <p>Browser-based Monte Carlo tools for charged-particle beams in solids. Everything runs on your own computer inside the browser; nothing is uploaded or installed.</p>
+  <div class="tools">
+    <a class="tool" href="crim.html"><b>CRIM</b><span>Ion ranges, damage cascades, vacancies and sputtering for 100 eV – 1 MeV ions, in the spirit of SRIM/TRIM.</span></a>
+    <a class="tool" href="crim-sweep.html"><b>CRIM Sweep</b><span>Plot range, straggle, sputter yield or stopping against beam energy; overlay runs and save PDF or CSV.</span></a>
+    <a class="tool" href="electron.html"><b>Electron Beam Monte Carlo</b><span>Trajectories, depth–dose, backscatter and beam broadening for 100 eV – 1 MeV electrons.</span></a>
+  </div>
+  <footer>Binary-collision approximation, amorphous targets. ZBL85 electronic-stopping coefficients from pyRUMP (MIT License); see THIRD_PARTY_NOTICES.md.</footer>
+</div>
+</body>
+</html>
