@@ -53,6 +53,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:4px}
 .chipb{all:unset;cursor:pointer;font-family:var(--f-mono);font-size:11px;padding:3px 7px;border-radius:3px;background:var(--chip);color:var(--ink)}
 .chipb:hover{background:var(--line)}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:-6px}
+.ctl .lab{margin-right:4px}
+.tog{all:unset;cursor:pointer;font-family:var(--f-mono);font-size:12px;padding:4px 9px;border-radius:3px;border:1px solid var(--line);color:var(--muted);background:var(--panel)}
+.tog[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.tog:focus-visible,.tlink:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tlink{all:unset;cursor:pointer;font-size:12px;color:var(--accent);text-decoration:underline;text-underline-offset:2px;margin-left:4px}
+.ctinfo{margin:-8px 0 0;font-family:var(--f-mono);font-size:11.5px;color:var(--muted);line-height:1.6}
 .seg{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
 .seg button{all:unset;cursor:pointer;flex:1;text-align:center;padding:6px 4px;font-size:12.5px;font-weight:500;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
@@ -64,6 +71,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .main{display:flex;flex-direction:column;gap:18px;min-width:0}
 .screen{background:var(--plot);border-radius:6px;position:relative;overflow:hidden}
 .screen canvas{display:block;width:100%;aspect-ratio:16/10;max-width:100%}
+@media (max-width:600px){.screen canvas{aspect-ratio:4/5}.screenbar{flex-direction:column}}
 .screenbar{position:absolute;top:10px;left:12px;right:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;pointer-events:none}
 .screenbar>*{pointer-events:auto}
 .tag{font-family:var(--f-mono);font-size:11.5px;color:var(--plot-ink);line-height:1.5}
@@ -129,13 +137,23 @@ textarea.fallback{width:100%;height:120px;font-family:var(--f-mono);font-size:11
   </div>
 
   <div class="field">
+    <div class="lab">Field of view</div>
+    <div class="seg" id="fovSeg"><button type="button" data-f="auto" aria-pressed="true">Auto</button><button type="button" data-f="fixed" aria-pressed="false">Fixed depth</button></div>
+    <div class="row" id="fovRow" hidden>
+      <input type="number" id="fovNum" value="5" min="0" step="any" aria-label="Field of view depth">
+      <select id="fovUnit" aria-label="Field of view unit"><option>nm</option><option selected>µm</option><option>mm</option></select>
+    </div>
+    <p class="hint" id="fovHint" hidden>The plot shows this depth below the surface and 1.8 times it across. Energy deposited outside it is still counted in the totals.</p>
+  </div>
+
+  <div class="field">
     <label class="lab" for="tilt">Beam tilt from normal <output id="tiltOut">0°</output></label>
     <input type="range" id="tilt" min="0" max="80" step="1" value="0">
   </div>
 
   <div class="field">
     <label class="lab" for="nEl">Electrons <output id="nOut"></output></label>
-    <input type="range" id="nEl" min="0" max="6" step="1" value="3">
+    <input type="range" id="nEl" min="0" max="9" step="1" value="3">
     <label class="lab" for="nTr">Trajectories drawn <output id="trOut"></output></label>
     <input type="range" id="nTr" min="10" max="400" step="10" value="100">
   </div>
@@ -161,6 +179,9 @@ textarea.fallback{width:100%;height:120px;font-family:var(--f-mono);font-size:11
     <div class="legend" id="legend"></div>
   </div>
 
+  <div class="ctl" id="saveRow"><span class="lab">Save view</span><button class="tog" type="button" id="sv_png">PNG</button><button class="tog" type="button" id="sv_jpg">JPG</button><button class="tog" type="button" id="sv_pdf">PDF</button><span class="hint" id="svMsg"></span></div>
+  <div class="ctl" id="contours" role="group" aria-label="Energy contours"><span class="lab">Energy contours</span></div>
+  <p class="ctinfo" id="ctInfo"></p>
   <div class="stats" id="stats"></div>
 
   <div class="charts">
@@ -230,7 +251,7 @@ function buildModel(mat, E0, Ecut) {
     S0col: s0[0], S0rad: s0[1], lam0: l0, ZA: ZA };
 }
 
-function simulate(p, onProgress) {
+function createSim(p) {
   var mat = p.mat, E0 = p.E0, Ecut = p.Ecut, film = p.thick > 0, T = p.thick;
   var M = buildModel(mat, E0, Ecut);
   var tilt = p.tilt * Math.PI / 180, sinT = Math.sin(tilt), cosT = Math.cos(tilt);
@@ -305,45 +326,61 @@ function simulate(p, onProgress) {
 
   // pilot run to size the tally grid
   tally = null; recStep = 1;
-  var o = {}, pz = 0, px = 0, NP = Math.min(200, p.n);
-  for (var k = 0; k < NP; k++) { track(false, o); if (o.maxz > pz) pz = o.maxz; if (o.maxx > px) px = o.maxx; }
-  if (pz <= 0) pz = M.R * 0.05;
-  Zg = Math.min(film ? T : Infinity, Math.min(1.15 * pz, M.R));
-  if (film && T < 1.15 * pz) Zg = T;
-  Xg = Math.max(1.15 * px, 0.02 * Zg);
+  var o = {}, k;
+  if (p.fov > 0) { Zg = p.fov; Xg = 0.9 * p.fov; } // fixed field of view chosen by the user
+  else {
+    var pz = 0, px = 0, NP = Math.min(200, p.n);
+    for (k = 0; k < NP; k++) { track(false, o); if (o.maxz > pz) pz = o.maxz; if (o.maxx > px) px = o.maxx; }
+    if (pz <= 0) pz = M.R * 0.05;
+    Zg = Math.min(film ? T : Infinity, Math.min(1.3 * pz, M.R));
+    if (film && T < 1.3 * pz) Zg = T;
+    Xg = Math.max(1.5 * px, 0.02 * Zg);
+  }
   recStep = Math.max(Zg, Xg) / 350;
 
   map = new Float64Array(NX * NZ); dep = new Float64Array(ND);
   depX = new Float64Array(NDX); exitX = new Float32Array(p.n);
   specB = new Float64Array(NS); specT = new Float64Array(NS);
   tally = { Edep: 0, Erad: 0, Eout: 0, Eback: 0, Etrans: 0, nB: 0, nT: 0, nA: 0, sumMaxZ: 0 };
-  var trajs = [], last = Date.now();
-  for (k = 0; k < p.n; k++) {
-    var rec = k < p.nTraj;
-    track(rec, o);
+  var trajs = [], nDone = 0;
+  function step(ms) {
+   var t0 = Date.now();
+   while (nDone < p.n && Date.now() - t0 < ms) {
+    var rec = nDone < p.nTraj;
+    track(rec, o); nDone++;
     tally.sumMaxZ += o.maxz;
     if (o.fate === 1) { tally.nB++; tally.Eback += o.E; specB[Math.min(NS - 1, (o.E / E0 * NS) | 0)]++; }
     else if (o.fate === 2) { exitX[nExit++] = o.x; tally.nT++; tally.Etrans += o.E; specT[Math.min(NS - 1, (o.E / E0 * NS) | 0)]++; }
     else tally.nA++;
     if (rec) trajs.push({ f: o.fate, p: new Float32Array(o.pts) });
-    if (onProgress && Date.now() - last > 120) { last = Date.now(); onProgress(k + 1); }
+   }
+   return nDone >= p.n;
   }
-  return {
-    E0: E0, Ecut: Ecut, n: p.n, thick: T, tilt: p.tilt, matKey: p.matKey,
+  function result() { return {
+    E0: E0, Ecut: Ecut, n: nDone, nReq: p.n, fov: p.fov || 0, thick: T, tilt: p.tilt, matKey: p.matKey,
     R: M.R, S0col: M.S0col, S0rad: M.S0rad, lam0: M.lam0,
     Zg: Zg, Xg: Xg, NX: NX, NZ: NZ, ND: ND, NS: NS,
     map: map, dep: dep, depX: depX, NDX: NDX, exitX: exitX.slice(0, nExit), specB: specB, specT: specT, tally: tally, trajs: trajs
-  };
+  }; }
+  return { step: step, result: result, done: function () { return nDone; } };
 }
+function simulate(p) { var s = createSim(p); s.step(1e12); return s.result(); }
 
 if (typeof self !== 'undefined' && typeof window === 'undefined' && typeof module === 'undefined') {
+  var sim = null, stopReq = false;
   self.onmessage = function (ev) {
-    var p = ev.data;
-    var res = simulate(p, function (d) { self.postMessage({ type: 'progress', done: d, total: p.n }); });
-    self.postMessage({ type: 'done', res: res });
+    var m = ev.data;
+    if (m.cmd === 'stop') { stopReq = true; return; }
+    var p = m.p || m; stopReq = false; sim = createSim(p);
+    (function tick() {
+      var fin = sim.step(150);
+      if (fin || stopReq) { self.postMessage({ type: 'done', res: sim.result() }); return; }
+      self.postMessage({ type: 'progress', done: sim.done(), total: p.n });
+      setTimeout(tick, 0);
+    })();
   };
 }
-if (typeof module !== 'undefined') module.exports = { simulate: simulate, buildModel: buildModel };
+if (typeof module !== 'undefined') module.exports = { simulate: simulate, createSim: createSim, buildModel: buildModel };
 </script><script>
 (function(){
 const MATS = {
@@ -355,7 +392,7 @@ const MATS = {
   cdte:{name:'CdTe',f:'Z 48 / 52',rho:5.85,I:539.3,comp:{Cd:0.468355,Te:0.531645}},
   au:{name:'Gold',f:'Au · Z 79',rho:19.32,I:790,comp:{Au:1}}
 };
-const COUNTS=[100,250,500,1000,2000,5000,10000];
+const COUNTS=[100,250,500,1000,2000,5000,10000,20000,50000,100000];
 const PRESETS=[0.1,1,5,20,100,200,300,1000];
 const $=id=>document.getElementById(id);
 const st={mat:'si',E:20,geo:'bulk',mode:'energy',res:null,running:false,worker:null};
@@ -395,18 +432,27 @@ const SRC=document.getElementById('engineSrc').textContent;
 function makeWorker(){ try{ return new Worker(URL.createObjectURL(new Blob([SRC],{type:'text/javascript'}))); }catch(e){ return null; } }
 function params(){ const m=MATS[st.mat]; let thick=0;
   if(st.geo==='film'){ const v=parseFloat($('tNum').value); const f={nm:1e-7,'µm':1e-4,mm:0.1}[$('tUnit').value]; thick=v>0?v*f:1e-5; }
-  const n=COUNTS[$('nEl').value]; return {mat:m,matKey:st.mat,E0:st.E,Ecut:Math.max(0.05,0.002*st.E),thick,tilt:+$('tilt').value,n,nTraj:Math.min(n,+$('nTr').value)}; }
+  let fov=0; if(st.fov==='fixed'){ const v=parseFloat($('fovNum').value); const f={nm:1e-7,'µm':1e-4,mm:0.1}[$('fovUnit').value]; fov=v>0?v*f:0; }
+  const n=COUNTS[$('nEl').value]; return {mat:m,matKey:st.mat,E0:st.E,Ecut:Math.max(0.05,0.002*st.E),thick,tilt:+$('tilt').value,n,nTraj:Math.min(n,+$('nTr').value),fov}; }
+st.fov='auto';
+function syncFov(){ [...$('fovSeg').children].forEach(x=>x.setAttribute('aria-pressed',x.dataset.f===st.fov)); $('fovRow').hidden=$('fovHint').hidden=st.fov!=='fixed';
+  try{ localStorage.setItem('fov',JSON.stringify({m:st.fov,v:$('fovNum').value,u:$('fovUnit').value})); }catch(e){} }
+$('fovSeg').onclick=e=>{ const b=e.target.closest('button'); if(!b) return; st.fov=b.dataset.f; syncFov(); };
+$('fovNum').onchange=$('fovUnit').onchange=syncFov;
+try{ const f=JSON.parse(localStorage.getItem('fov')||'null'); if(f){ st.fov=f.m==='fixed'?'fixed':'auto'; if(parseFloat(f.v)>0) $('fovNum').value=f.v; if(['nm','µm','mm'].includes(f.u)) $('fovUnit').value=f.u; } }catch(e){}
+syncFov();
 function run(){
-  if(st.running){ st.worker&&st.worker.terminate(); st.worker=null; finish('Stopped.'); return; }
-  const p=params(); st.running=true; $('run').textContent='Stop'; $('bar').style.width='0%';
+  if(st.running){ if(st.worker){ st.worker.postMessage({cmd:'stop'}); $('status').textContent='Stopping… finishing the current electron.'; } return; }
+  const p=params(); st.running=true; $('run').textContent='Stop and show results'; $('bar').style.width='0%';
   $('status').textContent=`Tracking ${p.n.toLocaleString('en-US')} electrons…`; const t0=performance.now();
-  const done=res=>{ st.res=res; drawAll(); finish(`${p.n.toLocaleString('en-US')} electrons in ${((performance.now()-t0)/1000).toFixed(1)} s.`); };
+  const done=res=>{ st.res=res; drawAll(); const secs=((performance.now()-t0)/1000).toFixed(1);
+    finish(res.n<res.nReq?`Stopped after ${res.n.toLocaleString('en-US')} of ${res.nReq.toLocaleString('en-US')} electrons (${secs} s).`:`${res.n.toLocaleString('en-US')} electrons in ${secs} s.`); };
   const w=makeWorker();
-  if(w){ st.worker=w; w.onmessage=ev=>{ const d=ev.data; if(d.type==='progress'){ const fr=d.done/d.total, el=(performance.now()-t0)/1000;
-        $('bar').style.width=(fr*100).toFixed(1)+'%'; $('status').textContent=`Tracking… ${d.done.toLocaleString('en-US')} / ${d.total.toLocaleString('en-US')} · ~${Math.max(0,el/fr-el).toFixed(0)} s left`; }
-      else { w.terminate(); st.worker=null; done(d.res); } };
+  if(w){ st.worker=w; w.onmessage=ev=>{ const d=ev.data; if(d.type==='progress'){ const fr=d.done/d.total, el=(performance.now()-t0)/1000, left=Math.max(0,el/fr-el);
+        $('bar').style.width=(fr*100).toFixed(1)+'%'; $('status').textContent=`Tracking… ${d.done.toLocaleString('en-US')} / ${d.total.toLocaleString('en-US')} · about ${left<90?Math.round(left)+' s':Math.round(left/60)+' min'} left`; }
+      else { w.terminate(); st.worker=null; if(d.res.n>0) done(d.res); else finish('Stopped before any electrons finished.'); } };
     w.onerror=()=>{ w.terminate(); st.worker=null; finish('The simulation failed to start. Reload the page and try again.'); };
-    w.postMessage(p);
+    w.postMessage({cmd:'start',p});
   } else { setTimeout(()=>{ const sim=new Function(SRC+';return simulate;')(); done(sim(p)); },30); }
 }
 function finish(msg){ st.running=false; $('run').textContent='Run simulation'; $('bar').style.width='100%'; $('status').textContent=msg; }
@@ -420,15 +466,147 @@ const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim
 const rampCSS=()=>'linear-gradient(90deg,'+[0,.25,.5,.75,1].map(t=>rgb(inferno(.18+.82*t))+' '+t*100+'%').join(',')+')';
 
 function ticks(min,max,n){ const span=max-min; if(span<=0) return {v:[min],step:1}; const s0=span/n, mag=10**Math.floor(Math.log10(s0)), r=s0/mag; const step=(r<1.5?1:r<3?2:r<7?5:10)*mag; const v=[]; for(let x=Math.ceil(min/step-1e-9)*step;x<=max+step*1e-6;x+=step) v.push(+x.toPrecision(10)); return {v,step}; }
-function fitCanvas(c){ const r=c.getBoundingClientRect(), d=window.devicePixelRatio||1; const W=Math.max(10,Math.round(r.width*d)),H=Math.max(10,Math.round(r.height*d)); if(c.width!==W||c.height!==H){c.width=W;c.height=H;} const ctx=c.getContext('2d'); ctx.setTransform(d,0,0,d,0,0); return {ctx,w:r.width,h:r.height}; }
+function fitCanvas(c){ const r=c._w?{width:c._w,height:c._h}:c.getBoundingClientRect(), d=c._d||window.devicePixelRatio||1; const W=Math.max(10,Math.round(r.width*d)),H=Math.max(10,Math.round(r.height*d)); if(c.width!==W||c.height!==H){c.width=W;c.height=H;} const ctx=c.getContext('2d'); ctx.setTransform(d,0,0,d,0,0); return {ctx,w:r.width,h:r.height}; }
 
 /* ---------- trajectory / deposition view ---------- */
-function drawView(){
-  const c=$('view'), {ctx,w,h}=fitCanvas(c); const R=st.res;
+
+/* ---------- energy-containment contours ---------- */
+const CLEV=[10,25,50,75,90,99,99.9];
+st.levels=new Set();
+try{ const saved=JSON.parse(localStorage.getItem('contours')||'[]'); saved.forEach(v=>{ if(CLEV.includes(v)) st.levels.add(v); }); }catch(e){}
+(function(){ const el=$('contours');
+  CLEV.forEach(v=>{ const b=document.createElement('button'); b.type='button'; b.className='tog'; b.dataset.v=v; b.textContent=v+'%'; b.setAttribute('aria-pressed',st.levels.has(v)); b.setAttribute('aria-label',`Contour enclosing ${v}% of deposited energy`);
+    b.onclick=()=>{ st.levels.has(v)?st.levels.delete(v):st.levels.add(v); syncLevels(); }; el.appendChild(b); });
+  const all=document.createElement('button'); all.type='button'; all.className='tlink'; all.textContent='All'; all.onclick=()=>{ CLEV.forEach(v=>st.levels.add(v)); syncLevels(); };
+  const none=document.createElement('button'); none.type='button'; none.className='tlink'; none.textContent='None'; none.onclick=()=>{ st.levels.clear(); syncLevels(); };
+  el.appendChild(all); el.appendChild(none); })();
+function syncLevels(){ $('contours').querySelectorAll('.tog').forEach(b=>b.setAttribute('aria-pressed',st.levels.has(+b.dataset.v)));
+  try{ localStorage.setItem('contours',JSON.stringify([...st.levels])); }catch(e){} drawView(); ctInfo(); }
+// Smooth the deposition map lightly, then find for each level the dose threshold whose
+// super-level set holds that fraction of all deposited energy.
+function contourData(R){
+  if(R._ct) return R._ct;
+  // Block-sum the fine map onto a coarser grid (coarser for fewer electrons), then smooth it,
+  // so contours follow the distribution rather than single-electron noise.
+  const B=R.n>=50000?1:R.n>=20000?2:R.n>=5000?3:R.n>=1000?4:5, NXc=Math.ceil(R.NX/B), NZc=Math.ceil(R.NZ/B);
+  let a=new Float64Array(NXc*NZc);
+  for(let j=0;j<R.NZ;j++) for(let i=0;i<R.NX;i++) a[((j/B)|0)*NXc+((i/B)|0)]+=R.map[j*R.NX+i];
+  for(let pass=0;pass<(B===1?5:3);pass++){ const b=new Float64Array(NXc*NZc);
+    for(let j=0;j<NZc;j++) for(let i=0;i<NXc;i++){ let s=0,wt=0; for(let dj=-1;dj<=1;dj++){ const jj=j+dj; if(jj<0||jj>=NZc) continue; for(let di=-1;di<=1;di++){ const ii=i+di; if(ii<0||ii>=NXc) continue; const k=(2-Math.abs(di))*(2-Math.abs(dj)); s+=k*a[jj*NXc+ii]; wt+=k; } } b[j*NXc+i]=s/wt; }
+    a=b; }
+  let tot=0; for(let k=0;k<a.length;k++) tot+=a[k];
+  const total=Math.max(tot,R.tally.Edep), sorted=Float64Array.from(a).sort().reverse(), dx=2*R.Xg/R.NX*B, dz=R.Zg/R.NZ*B;
+  const lev={}; let cum=0, k=0;
+  CLEV.forEach(p=>{ const need=p/100*total; while(k<sorted.length&&cum<need){ cum+=sorted[k]; k++; }
+    if(cum<need*0.999||k===0||sorted[k-1]<=0){ lev[p]=null; return; }
+    const t=sorted[k-1]; lev[p]={t}; });
+  const ct={a,lev,dx,dz,NX:NXc,NZ:NZc}; R._ct=ct;
+  // extents from the contour lines themselves
+  CLEV.forEach(p=>{ if(!lev[p]) return; const segs=contourSegs(R,lev[p].t); let zmax=0,xmin=Infinity,xmax=-Infinity;
+    segs.forEach(sg=>sg.forEach(pt=>{ const z=Math.min(R.Zg,Math.max(0,pt[1])); if(z>zmax) zmax=z; if(pt[0]<xmin) xmin=pt[0]; if(pt[0]>xmax) xmax=pt[0]; }));
+    Object.assign(lev[p],{depth:zmax,width:xmax-xmin,edge:zmax>=R.Zg*0.995&&!(R.thick>0)||xmin<=-R.Xg*0.99||xmax>=R.Xg*0.99}); });
+  return ct;
+}
+// marching squares on cell centres, padded with zeros so every contour closes
+function contourSegs(R,t){ const {a,dx,dz,NX,NZ}=R._ct, segs=[];
+  const V=(i,j)=>(i<0||j<0||i>=NX||j>=NZ)?0:a[j*NX+i];
+  const PX=i=>-R.Xg+(i+0.5)*dx, PZ=j=>(j+0.5)*dz;
+  for(let j=-1;j<NZ;j++) for(let i=-1;i<NX;i++){
+    const v0=V(i,j),v1=V(i+1,j),v2=V(i+1,j+1),v3=V(i,j+1);
+    const c=(v0>=t?1:0)|(v1>=t?2:0)|(v2>=t?4:0)|(v3>=t?8:0); if(c===0||c===15) continue;
+    const e=(pa,pb,va,vb)=>{ const f=(t-va)/((vb-va)||1e-300); return [pa[0]+f*(pb[0]-pa[0]),pa[1]+f*(pb[1]-pa[1])]; };
+    const p0=[PX(i),PZ(j)],p1=[PX(i+1),PZ(j)],p2=[PX(i+1),PZ(j+1)],p3=[PX(i),PZ(j+1)];
+    const T=()=>e(p0,p1,v0,v1), Rr=()=>e(p1,p2,v1,v2), Bt=()=>e(p3,p2,v3,v2), Lf=()=>e(p0,p3,v0,v3);
+    switch(c){
+      case 1: case 14: segs.push([Lf(),T()]); break;
+      case 2: case 13: segs.push([T(),Rr()]); break;
+      case 3: case 12: segs.push([Lf(),Rr()]); break;
+      case 4: case 11: segs.push([Rr(),Bt()]); break;
+      case 6: case 9: segs.push([T(),Bt()]); break;
+      case 7: case 8: segs.push([Lf(),Bt()]); break;
+      case 5: segs.push([Lf(),T()]); segs.push([Rr(),Bt()]); break;
+      case 10: segs.push([T(),Rr()]); segs.push([Lf(),Bt()]); break;
+    } }
+  return segs; }
+function drawContours(ctx,R,X,Z){
+  if(!st.levels.size) return; const {lev}=contourData(R);
+  const levels=CLEV.filter(v=>st.levels.has(v)&&lev[v]);
+  ctx.save(); ctx.lineJoin='round'; ctx.lineCap='round'; ctx.font='600 11px "JetBrains Mono", ui-monospace, monospace';
+  const labels=[];
+  levels.forEach((p,n)=>{ const segs=contourSegs(R,lev[p].t); if(!segs.length) return;
+    ctx.beginPath(); segs.forEach(s=>{ ctx.moveTo(X(s[0][0]),Z(s[0][1])); ctx.lineTo(X(s[1][0]),Z(s[1][1])); });
+    ctx.strokeStyle='rgba(5,8,14,0.75)'; ctx.lineWidth=3.2; ctx.setLineDash([]); ctx.stroke();
+    ctx.strokeStyle='#E9F6FF'; ctx.lineWidth=1.3; ctx.setLineDash(p>=99?[5,3]:[]); ctx.stroke(); ctx.setLineDash([]);
+    // label at the right-most point of the contour
+    let best=null; segs.forEach(s=>s.forEach(pt=>{ if(!best||pt[0]>best[0]) best=pt; }));
+    if(best) labels.push({x:X(best[0])+4,y:Z(best[1]),t:p+'%'}); });
+  // keep labels from overlapping
+  labels.sort((u,v)=>u.y-v.y); for(let i=1;i<labels.length;i++){ if(Math.abs(labels[i].x-labels[i-1].x)<34&&labels[i].y-labels[i-1].y<13) labels[i].y=labels[i-1].y+13; }
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  labels.forEach(l=>{ ctx.lineWidth=3; ctx.strokeStyle='rgba(5,8,14,0.85)'; ctx.strokeText(l.t,l.x,l.y); ctx.fillStyle='#E9F6FF'; ctx.fillText(l.t,l.x,l.y); });
+  ctx.restore(); }
+function ctInfo(){ const R=st.res, el=$('ctInfo'); if(!R||!st.levels.size){ el.textContent=st.levels.size?'':'Contours enclose 10% to 99.9% of the deposited energy, in the x–z projection. They show over every view.'; return; }
+  const {lev}=contourData(R);
+  el.innerHTML=CLEV.filter(v=>st.levels.has(v)).map(v=>lev[v]?`<span>${v}%: ${fmtL(lev[v].depth)} deep × ${fmtL(lev[v].width)} wide${lev[v].edge?' (reaches plot edge)':''}</span>`:`<span>${v}%: extends past the plotted region</span>`).join(' · ')+` <span>(x–z projection, smoothed; ${R.n<5000?'more electrons give smoother outer contours':'statistics set the 99.9% contour'})</span>`; }
+
+/* ---------- save the 2D view as PNG, JPG or PDF ---------- */
+let DL=null;
+if(window.claude&&typeof window.claude.use==='function'){ window.claude.use('downloads').then(d=>{ DL=d; }).catch(()=>{}); }
+async function saveFile(name,blob){ const msg=$('svMsg'); msg.textContent='';
+  if(DL){ try{ await DL.save({filename:name,data:blob}); msg.textContent='Saved '+name+'.'; }catch(e){ msg.textContent=e&&e.code==='declined'?'Save cancelled.':'Saving is not available in this view.'; } return; }
+  try{ const url=URL.createObjectURL(blob); const el=document.createElement('a'); el.href=url; el.download=name; document.body.appendChild(el); el.click(); el.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000); msg.textContent='Saved '+name+'.'; }
+  catch(e){ msg.textContent='Saving is not available in this view.'; } }
+// redraw the view off-screen at 3.2x, then paint the title and legend (HTML overlays on screen) into it
+function renderExport(){
+  const W=1000,H=625,D=3.2, off=document.createElement('canvas'); off._w=W; off._h=H; off._d=D;
+  drawView(off); const ctx=off.getContext('2d'); ctx.setTransform(D,0,0,D,0,0);
+  const plotInk=css('--plot-ink'), mono='"JetBrains Mono", ui-monospace, monospace';
+  const lines=$('viewTag').innerText.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(st.levels.size) lines.push('energy contours: '+CLEV.filter(v=>st.levels.has(v)).join(', ')+'%');
+  for(let i=0;i<lines.length;i++) lines[i]=lines[i].replace('RCSDA','CSDA range');
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  lines.forEach((t,i)=>{ ctx.font=(i===0?'600 13px ':'11.5px ')+mono; ctx.fillStyle=i===0?'#F4F7FB':plotInk; ctx.fillText(t,14,12+i*17); });
+  // legend
+  let x=14; const y=H-16; ctx.textBaseline='middle'; ctx.font='11px '+mono;
+  [...$('legend').children].forEach(sp=>{
+    if(sp.classList.contains('ramp')){ const g=ctx.createLinearGradient(x,0,x+120,0); const lo=st.mode==='dose'?.12:.18, hi=st.mode==='dose'?.88:.82;
+      [0,.25,.5,.75,1].forEach(t=>g.addColorStop(t,rgb(inferno(lo+hi*t)))); ctx.fillStyle=g; ctx.fillRect(x,y-4,120,8); x+=134; return; }
+    const dot=sp.querySelector('.dot'); if(dot){ ctx.fillStyle=getComputedStyle(dot).backgroundColor; ctx.beginPath(); ctx.arc(x+4.5,y,4.5,0,7); ctx.fill(); x+=14; }
+    const t=sp.textContent.trim(); ctx.fillStyle=plotInk; ctx.fillText(t,x,y); x+=ctx.measureText(t).width+14; });
+  return {off,W,H};
+}
+function canvasBlob(c,type,q){ return new Promise(res=>c.toBlob(res,type,q)); }
+function pdfFromJpeg(jpg,pxW,pxH){ // one-page PDF holding the JPEG, 7.5 in wide
+  const pw=540, ph=+(540*pxH/pxW).toFixed(2), enc=new TextEncoder(), parts=[], offs=[]; let len=0;
+  const push=x=>{ const b=typeof x==='string'?enc.encode(x):x; parts.push(b); len+=b.length; };
+  const content=`q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`;
+  push('%PDF-1.4\n%âãÏÓ\n');
+  const obj=(n,body,stream)=>{ offs[n]=len; push(`${n} 0 obj\n${body}\n`); if(stream){ push('stream\n'); push(stream); push('\nendstream\n'); } push('endobj\n'); };
+  obj(1,'<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2,'<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  obj(3,`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`);
+  obj(4,`<< /Length ${content.length} >>`,enc.encode(content));
+  obj(5,`<< /Type /XObject /Subtype /Image /Width ${pxW} /Height ${pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>`,jpg);
+  obj(6,'<< /Producer (Electron Beam Monte Carlo) /Title (Electron trajectories and energy deposition) >>');
+  const xref=len; push(`xref\n0 7\n0000000000 65535 f \n`+[1,2,3,4,5,6].map(n=>String(offs[n]).padStart(10,'0')+' 00000 n \n').join(''));
+  push(`trailer\n<< /Size 7 /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts,{type:'application/pdf'}); }
+function exportName(ext){ const R=st.res; const m=MATS[R.matKey]; return `electron-${sig(R.E0,4)}keV-${m.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}-${st.mode}.${ext}`; }
+async function saveView(fmt){ if(!st.res) return; const {off}=renderExport();
+  if(fmt==='png') return saveFile(exportName('png'),await canvasBlob(off,'image/png'));
+  // JPEG and PDF have no transparency: flatten onto the plot background
+  const flat=document.createElement('canvas'); flat.width=off.width; flat.height=off.height; const fc=flat.getContext('2d'); fc.fillStyle=css('--plot'); fc.fillRect(0,0,flat.width,flat.height); fc.drawImage(off,0,0);
+  const jb=await canvasBlob(flat,'image/jpeg',0.93);
+  if(fmt==='jpg') return saveFile(exportName('jpg'),jb);
+  const bytes=new Uint8Array(await jb.arrayBuffer()); return saveFile(exportName('pdf'),pdfFromJpeg(bytes,flat.width,flat.height)); }
+['png','jpg','pdf'].forEach(f=>$('sv_'+f).onclick=()=>saveView(f));
+
+function drawView(cv){
+  const c=cv||$('view'), {ctx,w,h}=fitCanvas(c); const R=st.res;
   ctx.fillStyle=css('--plot'); ctx.fillRect(0,0,w,h);
   const lg=$('legend');
   if(!R){ lg.innerHTML=''; return; }
-  const film=R.thick>0, ml=48, mr=18, mt=Math.max(54,h*.14), mb=36;
+  const film=R.thick>0, ml=48, mr=18, mt=w<600?96:Math.max(54,h*.14), mb=w<600?50:36;
   const sc=Math.min((w-ml-mr)/(2*R.Xg),(h-mt-mb)/R.Zg);
   const cx=ml+(w-ml-mr)/2, X=x=>cx+x*sc, Z=z=>mt+z*sc;
   const grid=css('--plot-grid'), ink=css('--plot-ink');
@@ -471,13 +649,15 @@ function drawView(){
       ? `<span><i class="dot" style="background:var(--back)"></i>backscattered</span>${film?'<span><i class="dot" style="background:var(--trans)"></i>transmitted</span>':''}<span><i class="dot" style="background:var(--abs)"></i>stopped in sample</span><span>· ${nb} of ${R.n.toLocaleString('en-US')} shown</span>`
       : `<span>${fmtE(R.Ecut)}</span><span class="ramp" style="background:${rampCSS()}"></span><span>${fmtE(R.E0)}</span><span>· ${nb} of ${R.n.toLocaleString('en-US')} shown</span>`;
   }
+  drawContours(ctx,R,X,Z);
   ctx.restore();
   // scale bar
   const target=(w-ml-mr)*0.18/sc*L.f; const t2=ticks(0,target,1); const bar=t2.step; const bpx=bar/L.f*sc;
-  const by=h-14, bx=w-mr-bpx; ctx.strokeStyle='#E8EEF6'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+bpx,by); ctx.stroke();
+  const by=Z(0)-9, bx=w-mr-bpx; ctx.strokeStyle='#E8EEF6'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+bpx,by); ctx.stroke();
   ctx.fillStyle='#E8EEF6'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.font='11px "JetBrains Mono", ui-monospace, monospace'; ctx.fillText(sig(bar)+' '+L.u,bx+bpx/2,by-4);
   const m=MATS[R.matKey];
-  $('viewTag').innerHTML=`<strong>${fmtE(R.E0)} e⁻ → ${m.name}</strong><br>${film?'film '+fmtL(R.thick):'bulk'} · tilt ${R.tilt}° · R<sub>CSDA</sub> ${fmtL(R.R)}`;
+  let inMap=0; for(let i=0;i<R.map.length;i++) inMap+=R.map[i]; const outF=R.tally.Edep>0?1-inMap/R.tally.Edep:0;
+  $('viewTag').innerHTML=`<strong>${fmtE(R.E0)} e⁻ → ${m.name}</strong><br>${film?'film '+fmtL(R.thick):'bulk'} · tilt ${R.tilt}° · R<sub>CSDA</sub> ${fmtL(R.R)}${R.fov?` · fixed view ${fmtL(R.fov)}`:''}${outF>0.01?`<br>${(outF*100).toFixed(outF<0.1?1:0)}% of deposited energy lies outside the view`:''}`;
 }
 
 /* ---------- charts ---------- */
@@ -568,11 +748,11 @@ function drawStats(){
   ];
   $('stats').innerHTML=tiles.map(t=>`<div class="stat"><span class="k">${t[0]}</span><span class="v">${t[1]}<small>${t[2]}</small></span><span class="d">${t[3]}</span></div>`).join('');
 }
-function drawAll(){ drawView(); drawStats(); drawCharts(); }
+function drawAll(){ ctInfo(); drawView(); drawStats(); drawCharts(); }
 
 /* ---------- CSV ---------- */
 function csv(){ const R=st.res; if(!R) return ''; const m=MATS[R.matKey], bw=R.Zg/R.ND, T=R.tally;
-  let s=`# Electron Beam Monte Carlo\n# material,${m.name}\n# E0_keV,${R.E0}\n# thickness_cm,${R.thick||'bulk'}\n# tilt_deg,${R.tilt}\n# electrons,${R.n}\n# backscatter_eta,${T.nB/R.n}\n# transmitted,${T.nT/R.n}\n# deposited_fraction,${T.Edep/R.E0/R.n}\n# CSDA_range_cm,${R.R}\n# ${R.thick>0?'lateral_FWHM_cm':'lateral_width50_cm'},${(lateral(R)||{}).v||''}\n\ndepth_cm,keV_per_electron_per_cm\n`;
+  let s=`# Electron Beam Monte Carlo\n# material,${m.name}\n# E0_keV,${R.E0}\n# thickness_cm,${R.thick||'bulk'}\n# tilt_deg,${R.tilt}\n# electrons,${R.n}\n# backscatter_eta,${T.nB/R.n}\n# transmitted,${T.nT/R.n}\n# deposited_fraction,${T.Edep/R.E0/R.n}\n# CSDA_range_cm,${R.R}\n# ${R.thick>0?'lateral_FWHM_cm':'lateral_width50_cm'},${(lateral(R)||{}).v||''}\n${(()=>{ const {lev}=contourData(R); return CLEV.map(p=>`# contour_${p}pct_depth_cm,${lev[p]?lev[p].depth:''}\n# contour_${p}pct_width_cm,${lev[p]?lev[p].width:''}\n`).join(''); })()}\ndepth_cm,keV_per_electron_per_cm\n`;
   for(let i=0;i<R.ND;i++) s+=`${((i+.5)*bw).toExponential(5)},${(R.dep[i]/R.n/bw).toExponential(5)}\n`;
   s+=`\nE_over_E0,backscattered_per_electron,transmitted_per_electron\n`;
   for(let i=0;i<R.NS;i++) s+=`${((i+.5)/R.NS).toFixed(4)},${R.specB[i]/R.n},${R.specT[i]/R.n}\n`;
@@ -596,6 +776,6 @@ let rq=0; const redraw=()=>{ cancelAnimationFrame(rq); rq=requestAnimationFrame(
 new ResizeObserver(redraw).observe($('view')); window.addEventListener('resize',redraw);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw);
 new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-drawView(); run();
+ctInfo(); drawView(); run();
 })();
 </script></body></html>
