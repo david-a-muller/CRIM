@@ -6,7 +6,7 @@ Browser-based Monte Carlo simulators for ion and electron beams in solids. Each 
 |---|---|
 | `index.html` | Landing page linking the tools |
 | `crim.html` | Ion transport (He, Ne, Ar, Ga, Kr, Xe; 100 eV – 1 MeV): ranges, straggle, damage cascades, vacancies, sputtering, energy deposition, stopping powers, energy sweeps |
-| `crim-sweep.html` | Range, straggle, sputter yield, damage or stopping versus beam energy, with overlaid runs and PDF/CSV export |
+| `crim-sweep.html` | Line plots of Range, straggle, sputter yield, damage or stopping versus beam energy, with overlaid runs and PDF/CSV export |
 | `electron.html` | Electron transport (100 eV – 1 MeV): trajectories, interaction volume, depth–dose, backscatter, lateral spread |
 
 ## Running it
